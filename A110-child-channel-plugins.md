@@ -119,40 +119,63 @@ Some LB policies and resolvers may need to create child channels. We use
 Note that this proposal does not mandate any behavior changes for `grpclb`
 specifically.
 
-To support this, the child channel options must be plumbed down into resolvers
-and LB policies. Here are examples of how a component like `grpclb` would use
-this plumbing:
+To support this, the child channel options must be plumbed down into
+resolvers and LB policies. Each internal component that creates a child
+channel `C` is explicitly responsible for applying and propagating those
+options:
 
-* Java: The `Helper` will provide a function that accepts a `ChannelBuilder` and
-  applies the child channel options (`ChannelConfigurator`) to it. In addition,
-  when internal components (e.g., xDS transport factories, or `Helper` methods
-  creating OOB channels) create a child channel `C`, they must call both
-  `channelConfigurator.configureChannelBuilder(channelBuilder)` to apply the
-  options to `C` and `channelBuilder.childChannelConfigurator(channelConfigurator)`
-  to propagate `O_child` recursively to any further child channels created by `C`.
-* Go: A new field (`ChildChannelOptions`) will be added to the `BuildOptions`
-  struct (passed when creating a resolver or LB policy) to contain the child
-  channel options. When a resolver or LB policy creates a child channel `C`, it
-  must apply `ChildChannelOptions` to `C` and propagate `ChildChannelOptions` so
-  that any further child channels created by `C` also inherit the options.
-* C-core: No special plumbing is needed because the child channel args are
-  simply passed as channel arguments, which are already available to LB
-  policies. However, when an LB policy creates a child channel, it must
-  propagate both the individual child channel args and the
-  `GRPC_ARG_CHILD_CHANNEL_ARGS` argument containing the child channel args to
-  the child channel.
+* Java: When an LB policy creates an out-of-band (OOB) child channel via
+  `LoadBalancer.Helper` (e.g., `createResolvingOobChannelBuilder()` or
+  `createOobChannel()`), the `Helper` implementation (`ManagedChannelImpl`)
+  is responsible for automatically calling
+  `channelConfigurator.configureChannelBuilder(builder)` to apply the
+  options to `C` and `builder.childChannelConfigurator(channelConfigurator)`
+  to propagate `O_child` recursively to any further child channels. For
+  resolvers and other internal components (e.g., `XdsClient` via
+  `GrpcXdsTransportFactory`) that independently create a child channel `C`,
+  `channelConfigurator` is plumbed via
+  `NameResolver.Args.getChildChannelConfigurator()`. That internal
+  component is responsible for explicitly calling both
+  `channelConfigurator.configureChannelBuilder(channelBuilder)` and
+  `channelBuilder.childChannelConfigurator(channelConfigurator)` when
+  constructing `C`.
+* Go: A new field (`ChildChannelOptions`) will be added to
+  `resolver.BuildOptions` and `balancer.BuildOptions` (passed when
+  creating a resolver or LB policy) to contain the child channel options
+  (`[]grpc.DialOption`). When a resolver (e.g., the xDS resolver creating
+  a control plane `XdsClient`) or an LB policy (e.g., `grpclb` creating an
+  out-of-band `ClientConn`) creates a child channel `C` (e.g., via
+  `grpc.NewClient`), that resolver or LB policy is responsible for applying
+  `ChildChannelOptions` to `C` and calling
+  `grpc.WithChildChannelOptions(ChildChannelOptions...)` so that any further
+  child channels created by `C` also inherit the options.
+* C-core: No special plumbing is needed to pass child channel options to LB
+  policies and resolvers because they are already contained within the
+  channel arguments (`grpc_channel_args`). When an LB policy or resolver
+  (e.g., `grpclb` or an xDS resolver) creates a child channel `C`, that LB
+  policy or resolver is responsible for propagating both the individual
+  child channel args (`O_child` applied to `C`) and the
+  `GRPC_ARG_CHILD_CHANNEL_ARGS` argument containing the child channel args
+  (`O_child` propagated recursively) to `C`.
 
 ### Language Implementations
 
 #### Java
 
-In Java, the configuration will be achieved by accepting functional interfaces.
-The API allows users to register a configurator on a `ManagedChannelBuilder<?>`
-or `ServerBuilder<?>`. When an internal library (e.g., xDS, gRPCLB, or out-of-band
-channel helpers) creates a child channel `C`, it performs two steps on `C`'s builder:
-1. Calls `channelConfigurator.configureChannelBuilder(builder)` to configure `C`.
-2. Calls `builder.childChannelConfigurator(channelConfigurator)` to propagate the
-   configurator recursively to any further child channels created by `C`.
+In Java, the configuration will be achieved by accepting functional
+interfaces. The API allows users to register a configurator on a
+`ManagedChannelBuilder<?>` or `ServerBuilder<?>`. When an internal library
+or component creates a child channel `C`:
+1. If created via `LoadBalancer.Helper` (`createResolvingOobChannelBuilder()`
+   or `createOobChannel()`), `ManagedChannelImpl` automatically calls
+   `channelConfigurator.configureChannelBuilder(builder)` and
+   `builder.childChannelConfigurator(channelConfigurator)` on `C`'s builder.
+2. If created independently by a resolver or internal transport factory
+   (e.g., `GrpcXdsTransportFactory`), that component retrieves
+   `channelConfigurator` via
+   `NameResolver.Args.getChildChannelConfigurator()` and explicitly calls
+   `channelConfigurator.configureChannelBuilder(builder)` and
+   `builder.childChannelConfigurator(channelConfigurator)` on `C`'s builder.
 
 * ##### Configuration Interface
 
@@ -178,13 +201,18 @@ channel helpers) creates a child channel `C`, it performs two steps on `C`'s bui
 * ##### API Changes
 
     * ManagedChannelBuilder:
-      Add `ManagedChannelBuilder#childChannelConfigurator(ChannelConfigurator channelConfigurator)`
-      to allow users to register this configurator.
+      Add `ManagedChannelBuilder#childChannelConfigurator(ChannelConfigurator`
+      `channelConfigurator)` to allow users to register this configurator.
     * XdsServerBuilder:
-      Add `XdsServerBuilder#childChannelConfigurator(ChannelConfigurator configurator)`
-      to allow users to provide configuration for any internal channels created
-      by the server (e.g., connections to external authorization or processing
-      services).
+      Add `XdsServerBuilder#childChannelConfigurator(ChannelConfigurator`
+      `configurator)` to allow users to provide configuration for any
+      internal channels created by the server (e.g., connections to external
+      authorization or processing services).
+    * NameResolver.Args:
+      Add `NameResolver.Args#getChildChannelConfigurator()` and
+      `NameResolver.Args.Builder#setChildChannelConfigurator(`
+      `ChannelConfigurator channelConfigurator)` to allow resolvers to access
+      the child channel configurator when creating internal child channels.
 
 * ##### Usage Example
 
@@ -240,6 +268,22 @@ into these internal channels from both entry points.
         return newFuncServerOption(func(o *serverOptions) {
             o.childDialOptions = opts
         })
+    }
+    ```
+
+* Resolvers and LB Policies: `BuildOptions`
+
+  To allow resolvers and load balancers to access child channel options when
+  creating child channels, `ChildChannelOptions` will be added to both
+  `resolver.BuildOptions` and `balancer.BuildOptions`.
+
+    ```go
+    type BuildOptions struct {
+        // ... existing fields ...
+        
+        // ChildChannelOptions contains the options to be applied to any
+        // internal child channels created by the resolver or load balancer.
+        ChildChannelOptions []DialOption
     }
     ```
 
