@@ -124,9 +124,17 @@ and LB policies. Here are examples of how a component like `grpclb` would use
 this plumbing:
 
 * Java: The `Helper` will provide a function that accepts a `ChannelBuilder` and
-  applies the child channel options to it.
-* Go: A new field will be added to the `BuildOptions` struct (passed when
-  creating a resolver or LB policy) to contain the child channel options.
+  applies the child channel options (`ChannelConfigurator`) to it. In addition,
+  when internal components (e.g., xDS transport factories, or `Helper` methods
+  creating OOB channels) create a child channel `C`, they must call both
+  `channelConfigurator.configureChannelBuilder(channelBuilder)` to apply the
+  options to `C` and `channelBuilder.childChannelConfigurator(channelConfigurator)`
+  to propagate `O_child` recursively to any further child channels created by `C`.
+* Go: A new field (`ChildChannelOptions`) will be added to the `BuildOptions`
+  struct (passed when creating a resolver or LB policy) to contain the child
+  channel options. When a resolver or LB policy creates a child channel `C`, it
+  must apply `ChildChannelOptions` to `C` and propagate `ChildChannelOptions` so
+  that any further child channels created by `C` also inherit the options.
 * C-core: No special plumbing is needed because the child channel args are
   simply passed as channel arguments, which are already available to LB
   policies. However, when an LB policy creates a child channel, it must
@@ -140,9 +148,11 @@ this plumbing:
 
 In Java, the configuration will be achieved by accepting functional interfaces.
 The API allows users to register a configurator on a `ManagedChannelBuilder<?>`
-or `ServerBuilder<?>`. When an internal library (e.g., xDS, gRPCLB) creates a
-child channel, it applies this user-provided configurator to the child's channel
-builder before building the channel.
+or `ServerBuilder<?>`. When an internal library (e.g., xDS, gRPCLB, or out-of-band
+channel helpers) creates a child channel `C`, it performs two steps on `C`'s builder:
+1. Calls `channelConfigurator.configureChannelBuilder(builder)` to configure `C`.
+2. Calls `builder.childChannelConfigurator(channelConfigurator)` to propagate the
+   configurator recursively to any further child channels created by `C`.
 
 * ##### Configuration Interface
 
