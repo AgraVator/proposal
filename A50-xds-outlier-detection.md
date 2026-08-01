@@ -137,7 +137,7 @@ When the `outlier_detection` LB policy receives an address update, it will creat
 
 When the child policy asks for a subchannel, the `outlier_detection` will wrap the subchannel with a wrapper (see [Subchannel Wrapper section](#subchannel-wrapper)). Then, the subchannel wrapper will be added to the list in the map entry for its address, if that map entry exists. If there is no map entry, or if the subchannel is created with multiple addresses, the subchannel will be ignored for outlier detection. If that address is currently ejected, that subchannel wrapper's `eject` method will be called.
 
-The `outlier_detection` LB policy will provide a picker that delegates to the child policy's picker, and when the request finishes, increment the corresponding counter in the map entry referenced by the subchannel wrapper that was picked. If both the `success_rate_ejection` and `failure_percentage_ejection` fields are unset in the configuration, the picker should not do that counting.
+The `outlier_detection` LB policy will provide a picker that delegates to the child policy's picker, and when the request finishes, increment the corresponding counter in the map entry referenced by the subchannel wrapper that was picked. Locally-initiated client-side cancellations (`hedging cancellations`, `application CANCELLED`, and `DEADLINE_EXCEEDED`) MUST be excluded from `successCount` and `failureCount`. If both the `success_rate_ejection` and `failure_percentage_ejection` fields are unset in the configuration, the picker should not do that counting.
 
 The `outlier_detection` LB policy will have a timer that triggers on a period determined by the `interval` config option, and does the following:
 
@@ -170,7 +170,7 @@ To un-eject an address, set the current ejection timestamp to `null` and call `u
 
 ### Call Counter
 
-This design is based directly on Envoy's implementation. The object contains two buckets, and each bucket has a number counting successes, and another counting failures. The active bucket is updated each time a call finishes. When the timer triggers, the inactive bucket is zeroed and swapped with the active bucket. Then the inactive bucket contains the number of successes and failures since the last time the timer triggered. Those numbers are used to evaluate the ejection criteria.
+This design is based directly on Envoy's implementation. The object contains two buckets, and each bucket has a number counting successes (`successCount`), and another counting failures (`failureCount`). The active bucket is updated each time a call finishes, excluding locally-initiated client-side cancellations (`hedging cancellations`, `application CANCELLED`, and `DEADLINE_EXCEEDED`). When the timer triggers, the inactive bucket is zeroed and swapped with the active bucket. Then the inactive bucket contains the number of successes and failures since the last time the timer triggered. Those numbers are used to evaluate the ejection criteria.
 
 ### Subchannel Wrapper
 
@@ -281,6 +281,10 @@ Envoy's specification of outlier detection includes the ejection criteria Consec
 ### Splitting External and Local Origin errors
 
 Envoy defines some errors as "external" and some as "local origin", and their specification of outlier detection allows separate configurations for handling each of them. gRPC does not separate errors that way, so there is no way to split them like that and handle those two categories separately.
+
+### Excluding Locally-Initiated Client-Side Cancellations
+
+Locally-initiated client-side cancellations (`hedging cancellations`, `application CANCELLED`, and `DEADLINE_EXCEEDED`) are excluded from outlier detection counting (`successCount` and `failureCount`). This aligns with Envoy's `resetStream()` behavior and prevents false-positive ejections during hedging.
 
 ### Map Entry Source
 
