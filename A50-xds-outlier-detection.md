@@ -284,7 +284,7 @@ Envoy defines some errors as "external" and some as "local origin", and their sp
 
 ### Excluding Locally-Initiated Client-Side Cancellations
 
-Locally-initiated client-side cancellations (`hedging cancellations`, application `CANCELLED`, and `DEADLINE_EXCEEDED`) are excluded from outlier detection counting (`successCount` and `failureCount`). Although `DEADLINE_EXCEEDED` could be argued as an endpoint or network issue, implementation-wise it is treated as a client-side cancellation. This aligns with Envoy's `resetStream()` behavior and prevents false-positive ejections during hedging.
+Locally-initiated client-side cancellations (`hedging cancellations`, application `CANCELLED`, and `DEADLINE_EXCEEDED`) are excluded from outlier detection counting (`successCount` and `failureCount`). For locally-initiated cancellations (`hedging cancellations` of non-winning sibling attempts and application-initiated cancellations), this aligns with Envoy's `resetStream()` behavior and prevents false-positive ejections during hedging. For `DEADLINE_EXCEEDED`, this differs from Envoy (which counts deadline expirations as failures for outlier detection); however, because deadline expiration semantics vary between Envoy and gRPC, and implementation-wise it is much simpler to handle `DEADLINE_EXCEEDED` identically to cancellation, gRPC treats it as a client-side cancellation.
 
 ### Map Entry Source
 
