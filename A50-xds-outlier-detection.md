@@ -284,11 +284,7 @@ Envoy defines some errors as "external" and some as "local origin", and their sp
 
 ### Excluding Client-Initiated Cancellations and Deadline Expirations
 
-Client-initiated cancellations (such as application cancellations, cancellations of non-winning hedged attempts, etc.) and client-side deadline expirations are excluded from outlier detection counting.
-
-Excluding client cancellations aligns with Envoy's `resetStream()` behavior and prevents false-positive endpoint ejections when hedging is enabled.
-
-Excluding client-side deadline expirations differs from Envoy, which counts timeouts as failures for outlier detection. However, in gRPC, client-side deadline expirations cannot be reliably distinguished from other client-initiated cancellations cross-language, and a deadline expiration cannot be definitively attributed to an endpoint failure rather than client-side or network delays. Therefore, client-side deadline expirations are treated identically to client cancellations and excluded from outlier detection counting.
+Client-initiated cancellations (such as application cancellations, cancellations of non-winning hedged attempts, etc.) and client-side deadline expirations are excluded from outlier detection counting. Excluding client cancellations aligns with Envoy's `resetStream()` behavior and prevents false-positive endpoint ejections when hedging is enabled. Excluding client-side deadline expirations differs from Envoy, which counts timeouts as failures for outlier detection. However, in gRPC, client-side deadline expirations cannot be reliably distinguished from other client-initiated cancellations cross-language, and a deadline expiration cannot be definitively attributed to an endpoint failure rather than client-side or network delays. Therefore, client-side deadline expirations are treated identically to client cancellations and excluded from outlier detection counting.
 
 ### Map Entry Source
 
