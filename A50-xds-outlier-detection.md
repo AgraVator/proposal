@@ -170,7 +170,7 @@ To un-eject an address, set the current ejection timestamp to `null` and call `u
 
 ### Call Counter
 
-This design is based directly on Envoy's implementation. The object contains two buckets, and each bucket has a number counting successes, and another counting failures. The active bucket is updated each time a call finishes, excluding locally-initiated client-side cancellations (hedging cancellations, application cancellation, and deadline exceeded). When the timer triggers, the inactive bucket is zeroed and swapped with the active bucket. Then the inactive bucket contains the number of successes and failures since the last time the timer triggered. Those numbers are used to evaluate the ejection criteria.
+This design is based directly on Envoy's implementation. The object contains two buckets, and each bucket has a number counting successes, and another counting failures. The active bucket is updated each time a call finishes, excluding client-initiated cancellations (such as application cancellations, cancellations of non-winning hedged attempts, etc.) and client-side deadline expirations. When the timer triggers, the inactive bucket is zeroed and swapped with the active bucket. Then the inactive bucket contains the number of successes and failures since the last time the timer triggered. Those numbers are used to evaluate the ejection criteria.
 
 ### Subchannel Wrapper
 
@@ -282,9 +282,13 @@ Envoy's specification of outlier detection includes the ejection criteria Consec
 
 Envoy defines some errors as "external" and some as "local origin", and their specification of outlier detection allows separate configurations for handling each of them. gRPC does not separate errors that way, so there is no way to split them like that and handle those two categories separately.
 
-### Excluding Locally-Initiated Client-Side Cancellations
+### Excluding Client-Initiated Cancellations and Deadline Expirations
 
-Locally-initiated client-side cancellations (hedging cancellations, application cancellation, and deadline exceeded) are excluded from outlier detection counting. For locally-initiated cancellations (hedging cancellations of non-winning sibling attempts and application-initiated cancellations), this aligns with Envoy's `resetStream()` behavior and prevents false-positive ejections during hedging. For deadline exceeded, this differs from Envoy (which counts deadline expirations as failures for outlier detection). In gRPC, client-side deadline expiration cannot be reliably distinguished from other client cancellations cross-language, and a deadline expiration cannot be definitively attributed to a server failure rather than a network or client-side delay. Therefore, gRPC treats client-side deadline expiration as a locally-initiated cancellation and excludes it from outlier detection counting.
+Client-initiated cancellations (such as application cancellations, cancellations of non-winning hedged attempts, etc.) and client-side deadline expirations are excluded from outlier detection counting.
+
+Excluding client cancellations aligns with Envoy's `resetStream()` behavior and prevents false-positive endpoint ejections when hedging is enabled.
+
+Excluding client-side deadline expirations differs from Envoy, which counts timeouts as failures for outlier detection. However, in gRPC, client-side deadline expirations cannot be reliably distinguished from other client-initiated cancellations cross-language, and a deadline expiration cannot be definitively attributed to an endpoint failure rather than client-side or network delays. Therefore, client-side deadline expirations are treated identically to client cancellations and excluded from outlier detection counting.
 
 ### Map Entry Source
 
